@@ -1,0 +1,12 @@
+# Core geospatial stack (all free / open-source, no paid services)
+rasterio>=1.3
+numpy>=1.24
+scipy>=1.10
+shapely>=2.0
+pyproj>=3.5
+
+# STAC search + free/keyless asset access on Microsoft Planetary Computer
+pystac-client>=0.7
+planetary-computer>=1.0
+
+requests>=2.31
