@@ -134,10 +134,13 @@ def run(aoi: AOI, grid: Grid, config: dict, cache_root: Path, out_dir: Path, ref
 
     if selection is None:
         stac = catalog.open_catalog(config["stac_endpoint"])
+        max_cloud = config["cloud_cover_fallback_pct"][-1]
         items = catalog.search_items(
             stac, collection, aoi, config["sentinel2_lookback_days"],
-            query={"eo:cloud_cover": {"lt": 100}},
+            cql2_filter={"op": "<=", "args": [{"property": "eo:cloud_cover"}, max_cloud]},
         )
+        if not items:
+            items = catalog.search_items(stac, collection, aoi, config["sentinel2_lookback_days"])
         log(f"Sentinel-2: {len(items)} scene(s) found in the last {config['sentinel2_lookback_days']} days")
         scene, reference, threshold = select_scenes(items, aoi, config["cloud_cover_fallback_pct"])
         selection = {"scene": scene, "reference": reference, "cloud_threshold_used": threshold}
@@ -146,7 +149,7 @@ def run(aoi: AOI, grid: Grid, config: dict, cache_root: Path, out_dir: Path, ref
         log("Sentinel-2: using cached scene selection")
 
     scene = selection["scene"]
-    log(f"Sentinel-2 selected: {scene['id']} ({scene['datetime'][:10]}, cloud {scene['cloud_cover_pct']}%)")
+    log(f"Sentinel-2 selected: {scene['id']} ({scene['datetime'][:10]}, cloud {scene['cloud_cover_pct'] or 0:.1f}%)")
     if selection["cloud_threshold_used"] is None or (scene["cloud_cover_pct"] or 0) > 20:
         log("Sentinel-2: scene cloud cover is high; interpret optical results with care.", "WARNING")
 

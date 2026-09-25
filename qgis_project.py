@@ -51,6 +51,12 @@ LAYER_GROUPS: list[tuple[str, list[tuple[str, str, str, bool]]]] = [
 ]
 
 
+def _is_empty_geojson(path: Path) -> bool:
+    if path.suffix != ".geojson":
+        return False
+    return not json.loads(path.read_text(encoding="utf-8")).get("features")
+
+
 def build_spec(out_dir: Path, aoi_geojson: Path, utm_epsg: int, extent_utm: tuple, osm_url: str,
                title: str) -> dict:
     groups = []
@@ -58,7 +64,7 @@ def build_spec(out_dir: Path, aoi_geojson: Path, utm_epsg: int, extent_utm: tupl
         entries = []
         for filename, name, style, visible in layers:
             path = out_dir / filename
-            if path.exists():
+            if path.exists() and not _is_empty_geojson(path):
                 kind = "vector" if path.suffix == ".geojson" else "raster"
                 entries.append({"kind": kind, "path": str(path.resolve()), "name": name,
                                 "style": style, "visible": visible})

@@ -97,6 +97,8 @@ def style_raster(layer: QgsRasterLayer, style: str) -> None:
 
 
 def style_vector(layer: QgsVectorLayer, style: str) -> None:
+    if layer.renderer() is None:  # layer without features/geometry type
+        return
     if style == "aoi":
         symbol = QgsFillSymbol.createSimple(
             {"color": "0,0,0,0", "outline_color": "0,0,0,255", "outline_width": "0.6", "outline_style": "dash"}

@@ -44,18 +44,21 @@ def search_items(
     collection: str,
     aoi: AOI,
     lookback_days: int,
-    query: dict[str, Any] | None = None,
-    max_items: int = 200,
+    cql2_filter: dict[str, Any] | None = None,
+    max_items: int = 500,
 ) -> list:
     end = dt.datetime.now(dt.timezone.utc)
     start = end - dt.timedelta(days=lookback_days)
+    kwargs: dict[str, Any] = {}
+    if cql2_filter:
+        kwargs = {"filter": cql2_filter, "filter_lang": "cql2-json"}
     try:
         search = catalog.search(
             collections=[collection],
             bbox=list(aoi.bounds_wgs84),
             datetime=f"{start:%Y-%m-%dT%H:%M:%SZ}/{end:%Y-%m-%dT%H:%M:%SZ}",
-            query=query or {},
             max_items=max_items,
+            **kwargs,
         )
         return list(search.items())
     except Exception as exc:  # noqa: BLE001
