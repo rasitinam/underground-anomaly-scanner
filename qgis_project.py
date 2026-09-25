@@ -10,6 +10,7 @@ import platform
 import subprocess
 from pathlib import Path
 
+from env_check import run_interpreter
 from logger import log
 
 BUILDER = Path(__file__).with_name("qgis_builder.py")
@@ -83,12 +84,6 @@ def _clean_env() -> dict:
     return env
 
 
-def _command(qgis_python: str, *args: str) -> list[str]:
-    if qgis_python.lower().endswith(".bat"):
-        return ["cmd", "/c", qgis_python, *args]
-    return [qgis_python, *args]
-
-
 def write_project(spec: dict, spec_path: Path, qgis_python: str | None) -> Path | None:
     spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     if not qgis_python:
@@ -97,8 +92,7 @@ def write_project(spec: dict, spec_path: Path, qgis_python: str | None) -> Path 
         return None
     log(f"Building QGIS project with {qgis_python}")
     try:
-        proc = subprocess.run(_command(qgis_python, str(BUILDER), str(spec_path)),
-                              capture_output=True, text=True, timeout=300, env=_clean_env())
+        proc = run_interpreter(qgis_python, [str(BUILDER), str(spec_path)], timeout=300, env=_clean_env())
     except Exception as exc:  # noqa: BLE001
         log(f"QGIS project build failed to start: {exc}", "ERROR")
         return None

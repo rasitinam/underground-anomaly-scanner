@@ -65,11 +65,22 @@ class EnvironmentReport:
         return d
 
 
+def windows_bat_command(bat: str, args: list[str]) -> str:
+    # "call" keeps cmd.exe from stripping the quotes around paths that contain spaces.
+    return "call " + " ".join(f'"{a}"' for a in [bat, *args])
+
+
+def run_interpreter(python: str, args: list[str], timeout: int, env: dict | None = None) -> subprocess.CompletedProcess:
+    """Run a Python interpreter or a QGIS python-qgis*.bat launcher with arguments."""
+    if python.lower().endswith(".bat"):
+        return subprocess.run(windows_bat_command(python, args), shell=True, capture_output=True,
+                              text=True, timeout=timeout, env=env)
+    return subprocess.run([python, *args], capture_output=True, text=True, timeout=timeout, env=env)
+
+
 def _run(cmd: list[str], timeout: int = 10) -> tuple[bool, str]:
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
-        )
+        result = run_interpreter(cmd[0], cmd[1:], timeout)
         return result.returncode == 0, (result.stdout or "") + (result.stderr or "")
     except Exception as exc:  # noqa: BLE001 - report, never crash
         return False, str(exc)
@@ -89,52 +100,127 @@ def find_qgis_installations() -> list[QgisInstallation]:
     return found
 
 
-def _find_qgis_windows() -> list[QgisInstallation]:
-    found: list[QgisInstallation] = []
-    search_roots = []
-    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
-        val = os.environ.get(env_var)
-        if val:
-            search_roots.append(val)
-    search_roots += ["C:\\OSGeo4W64", "C:\\OSGeo4W"]
+def _path_from_command(value: str) -> str | None:
+    """'"C:\\x y\\bin\\qgis-bin.exe" "%1"' / 'C:\\x\\Uninstall.exe,0' -> the executable path."""
+    value = value.strip()
+    if not value:
+        return None
+    if value.startswith('"'):
+        return value[1:].split('"', 1)[0]
+    lowered = value.lower()
+    for ext in (".exe", ".bat", ".ico"):
+        idx = lowered.find(ext)
+        if idx != -1:
+            return value[: idx + len(ext)]
+    return value.split(",")[0]
 
-    candidate_dirs: set[str] = set()
-    for root in search_roots:
-        candidate_dirs.update(glob.glob(f"{root}\\QGIS*"))
-        candidate_dirs.update(glob.glob(f"{root}"))  # OSGeo4W root itself
 
-    # Registry uninstall entries (belt-and-suspenders, Windows only).
+def _qgis_root(path_str: str | None) -> str | None:
+    """Turn any file/dir inside a QGIS install into its root (the folder that contains 'bin')."""
+    if not path_str:
+        return None
+    p = Path(os.path.expandvars(path_str.strip().rstrip("\\/")))
+    # Folder names like "QGIS 3.40.5" have a "suffix", so test for a real file instead.
+    if p.is_file() or (not p.exists() and p.suffix.lower() in (".exe", ".bat", ".ico", ".lnk")):
+        p = p.parent
+    for candidate in (p, p.parent, p.parent.parent):
+        if (candidate / "bin").is_dir():
+            return str(candidate)
+    return str(p)
+
+
+def _registry_qgis_dirs() -> set[str]:
+    dirs: set[str] = set()
     try:
         import winreg
+    except ImportError:
+        return dirs
 
-        uninstall_roots = [
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-        ]
-        for hive, path in uninstall_roots:
+    uninstall_roots = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ]
+    for hive, path in uninstall_roots:
+        try:
+            key = winreg.OpenKey(hive, path)
+        except OSError:
+            continue
+        for i in range(winreg.QueryInfoKey(key)[0]):
             try:
-                key = winreg.OpenKey(hive, path)
+                sub_key = winreg.OpenKey(key, winreg.EnumKey(key, i))
+                display_name = str(winreg.QueryValueEx(sub_key, "DisplayName")[0])
             except OSError:
                 continue
-            for i in range(winreg.QueryInfoKey(key)[0]):
+            if "qgis" not in display_name.lower() and "osgeo4w" not in display_name.lower():
+                continue
+            # NSIS/MSI installers do not always fill InstallLocation; fall back to other values.
+            for value_name in ("InstallLocation", "DisplayIcon", "UninstallString", "InstallSource"):
                 try:
-                    sub_name = winreg.EnumKey(key, i)
-                    sub_key = winreg.OpenKey(key, sub_name)
-                    display_name = winreg.QueryValueEx(sub_key, "DisplayName")[0]
-                    if "QGIS" in display_name:
-                        install_location = winreg.QueryValueEx(sub_key, "InstallLocation")[0]
-                        if install_location:
-                            candidate_dirs.add(install_location.rstrip("\\"))
+                    raw = str(winreg.QueryValueEx(sub_key, value_name)[0])
                 except OSError:
                     continue
-    except ImportError:
-        pass  # not on Windows
+                root = _qgis_root(raw if value_name == "InstallLocation" else _path_from_command(raw))
+                if root:
+                    dirs.add(root)
 
+    # File association of .qgz/.qgs -> "...\bin\qgis-bin.exe" "%1"
+    for ext in (".qgz", ".qgs"):
+        try:
+            prog_id = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, ext)
+            command = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, rf"{prog_id}\shell\open\command")
+        except OSError:
+            continue
+        root = _qgis_root(_path_from_command(command))
+        if root:
+            dirs.add(root)
+    return dirs
+
+
+def _windows_search_roots() -> list[str]:
+    roots: list[str] = []
+    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LOCALAPPDATA"):
+        val = os.environ.get(env_var)
+        if val:
+            roots.append(val)
+            if env_var == "LOCALAPPDATA":
+                roots.append(str(Path(val) / "Programs"))
+    for letter in "CDEFGH":
+        drive = f"{letter}:\\"
+        if os.path.exists(drive):
+            roots += [drive, f"{drive}Program Files", f"{drive}Program Files (x86)"]
+    return roots
+
+
+def _find_qgis_windows() -> list[QgisInstallation]:
+    found: list[QgisInstallation] = []
+    candidate_dirs: set[str] = set()
+
+    # Optional user override (the folder that contains QGIS's 'bin'), never hardcoded here.
+    override = os.environ.get("QGIS_PATH")
+    if override:
+        candidate_dirs.add(_qgis_root(override) or override)
+
+    for root in _windows_search_roots():
+        for pattern in ("QGIS*", "OSGeo4W*"):
+            candidate_dirs.update(glob.glob(os.path.join(root, pattern)))
+
+    candidate_dirs.update(_registry_qgis_dirs())
+
+    for name in ("qgis-bin", "qgis-ltr-bin", "qgis", "qgis-ltr"):
+        exe = shutil.which(name)
+        if exe:
+            root = _qgis_root(exe)
+            if root:
+                candidate_dirs.add(root)
+
+    seen: set[str] = set()
     for d in sorted(candidate_dirs):
         d_path = Path(d)
-        if not d_path.exists():
+        key = str(d_path).lower().rstrip("\\")
+        if key in seen or not d_path.is_dir():
             continue
+        seen.add(key)
         # The python-qgis*.bat launchers set PYTHONHOME/PATH/QT so qgis.core imports.
         qgis_python = _first_match(
             [
@@ -148,7 +234,9 @@ def _find_qgis_windows() -> list[QgisInstallation]:
         qgis_bin = _first_match(
             [
                 str(d_path / "bin" / "qgis-bin.exe"),
+                str(d_path / "bin" / "qgis-ltr-bin.exe"),
                 str(d_path / "bin" / "qgis.bat"),
+                str(d_path / "bin" / "qgis-ltr.bat"),
                 str(d_path / "bin" / "qgis.exe"),
             ]
         )
@@ -335,6 +423,8 @@ def format_report(report: EnvironmentReport) -> str:
     else:
         lines.append("QGIS            : NOT FOUND")
         lines.append("  -> Install QGIS (free, official): https://qgis.org/download/")
+        lines.append("  -> Already installed in an unusual place? Set the folder that contains QGIS's 'bin':")
+        lines.append('     set QGIS_PATH=D:\\path\\to\\QGIS 3.xx      (then run the command again)')
     lines.append("")
 
     if report.snap_installation:
