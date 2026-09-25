@@ -251,6 +251,8 @@ def run(aoi: AOI, grid: Grid, config: dict, cache_root: Path, out_dir: Path,
     cache_dir = catalog.aoi_cache_dir(cache_root, aoi) / "sentinel1"
     selection_path = cache_dir / "selection.json"
     selection = None if refresh else catalog.load_selection(selection_path)
+    if selection is not None and selection.get("max_scenes") != config["sentinel1_max_scenes"]:
+        selection = None  # cache from an older version / different settings
     stac_holder: dict = {}
 
     def get_stac():
@@ -287,7 +289,7 @@ def run(aoi: AOI, grid: Grid, config: dict, cache_root: Path, out_dir: Path,
                 log(f"Sentinel-1: collection '{collection}' not usable ({type(exc).__name__}: {exc})", "WARNING")
         if not stack:
             raise catalog.DataSourceUnavailable(f"No usable Sentinel-1 data: {last_error}")
-        catalog.save_selection(selection_path, {"scenes": scenes})
+        catalog.save_selection(selection_path, {"scenes": scenes, "max_scenes": config["sentinel1_max_scenes"]})
 
     if snap_gpt and s1_safe:
         try:
@@ -319,7 +321,15 @@ def run(aoi: AOI, grid: Grid, config: dict, cache_root: Path, out_dir: Path,
     else:
         log("Sentinel-1: only one scene available; temporal SAR comparison skipped.", "WARNING")
 
+    # Multi-temporal average in linear power: speckle drops roughly with sqrt(number of dates).
+    vv_mean = to_db(nan_reduce(np.stack([10 ** (s["vv"] / 10) for s in stack])))
+    vh_mean = to_db(nan_reduce(np.stack([10 ** (s["vh"] / 10) for s in stack])))
+    paths["s1_vv_mean"] = save_geotiff(out_dir / "s1_vv_mean_db.tif", vv_mean, grid)
+    paths["s1_vh_mean"] = save_geotiff(out_dir / "s1_vh_mean_db.tif", vh_mean, grid)
+    log(f"Sentinel-1: multi-temporal mean of {len(stack)} dates written (reduced speckle)")
+
     for s in scenes:
         log(f"Sentinel-1 scene: {s['id']} ({s['datetime'][:10]}) - {s.get('calibration', '')}")
     return {"scenes": scenes, "paths": paths, "vv": latest["vv"], "vh": latest["vh"],
+            "vv_mean": vv_mean, "vh_mean": vh_mean,
             "vv_stack": vv_stack, "vv_change": change, "vv_temporal_std": temporal_std}

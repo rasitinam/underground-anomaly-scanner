@@ -71,14 +71,18 @@ def build_source_scores(s2: dict | None, s1: dict | None, terrain: dict | None,
     scores: dict[str, np.ndarray] = {}
     flags: dict[str, np.ndarray] = {}
 
+    # Multi-date median / mean are preferred: far less noise than a single acquisition.
     if s2 is not None:
-        z = local_zscore(s2["ndvi"], win)
+        ndvi = s2["ndvi_median"] if s2.get("ndvi_median") is not None else s2["ndvi"]
+        z = local_zscore(ndvi, win)
         scores["vegetation"] = z_to_score(z, thr)
         flags["vegetation"] = np.abs(z) >= thr
 
     if s1 is not None:
-        z_vv = np.abs(local_zscore(s1["vv"], win))
-        z_vh = np.abs(local_zscore(s1["vh"], win))
+        vv = s1["vv_mean"] if s1.get("vv_mean") is not None else s1["vv"]
+        vh = s1["vh_mean"] if s1.get("vh_mean") is not None else s1["vh"]
+        z_vv = np.abs(local_zscore(vv, win))
+        z_vh = np.abs(local_zscore(vh, win))
         z = nan_reduce(np.stack([z_vv, z_vh]))
         scores["sar"] = z_to_score(z, thr)
         flags["sar"] = z >= thr
@@ -93,9 +97,11 @@ def build_source_scores(s2: dict | None, s1: dict | None, terrain: dict | None,
         p = persistence(list(s1["vv_stack"]), win, thr)
         if p is not None:
             temporal_parts.append(p)
-    if s2 is not None and s2.get("ndvi_change") is not None:
-        ndvi_ref = s2["ndvi"] - s2["ndvi_change"]
-        p = persistence([s2["ndvi"], ndvi_ref], win, thr)
+    if s2 is not None:
+        ndvi_dates = s2.get("ndvi_stack")
+        if not ndvi_dates and s2.get("ndvi_change") is not None:
+            ndvi_dates = [s2["ndvi"], s2["ndvi"] - s2["ndvi_change"]]
+        p = persistence(ndvi_dates or [], win, thr)
         if p is not None:
             temporal_parts.append(p)
     if temporal_parts:

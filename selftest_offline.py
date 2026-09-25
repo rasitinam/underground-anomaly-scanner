@@ -39,16 +39,24 @@ def seed_cache(cache_root: Path, config: dict) -> tuple[int, int, int, int]:
                            "platform": "synthetic", "processing_baseline": "05.10", "collection": "sentinel-2-l2a"},
                  "reference": {"id": "S2_SYNTH_OLD", "datetime": "2025-07-03T09:00:00", "cloud_cover_pct": 5.0,
                                "platform": "synthetic", "processing_baseline": "05.10", "collection": "sentinel-2-l2a"},
-                 "cloud_threshold_used": 10}
-    for sc in (s2_scenes["scene"], s2_scenes["reference"]):
+                 "cloud_threshold_used": 10,
+                 "composite_max_scenes": config["sentinel2_composite_max_scenes"],
+                 "composite": [{"id": f"S2_SYNTH_C{i}", "datetime": f"2026-0{i + 3}-15T09:00:00", "cloud_cover_pct": 4.0,
+                                "platform": "synthetic", "processing_baseline": "05.10",
+                                "collection": "sentinel-2-l2a"} for i in range(5)]}
+    for sc in [s2_scenes["scene"], s2_scenes["reference"], *s2_scenes["composite"]]:
         d = base / "sentinel2" / sc["id"]
-        refl = {"B02": 0.05, "B03": 0.08, "B04": 0.07, "B08": 0.35, "B11": 0.20, "B12": 0.12}
+        refl = {"B02": 0.05, "B03": 0.08, "B04": 0.07, "B05": 0.12, "B08": 0.35, "B8A": 0.36,
+                "B11": 0.20, "B12": 0.12}
         for band, v in refl.items():
             arr = v + rng.normal(0, 0.01, (h, w))
-            if band == "B08":
+            if band in ("B08", "B8A"):
                 arr[feature] -= 0.15  # stressed vegetation over the feature
             save_geotiff(d / f"{band}.tif", ((arr * 10000) + 1000).astype("float32"), grid)
-        save_geotiff(d / "SCL.tif", np.full((h, w), 4, "float32"), grid)
+        scl = np.full((h, w), 4, "float32")
+        if sc["id"] == "S2_SYNTH_C1":
+            scl[:10, :] = 9  # a cloud: must be masked out of the median
+        save_geotiff(d / "SCL.tif", scl, grid)
     catalog.save_selection(base / "sentinel2" / "selection.json", s2_scenes)
 
     s1_scenes = []
@@ -61,7 +69,8 @@ def seed_cache(cache_root: Path, config: dict) -> tuple[int, int, int, int]:
             arr = level + rng.normal(0, 0.7, (h, w))
             arr[feature] += 4.0  # persistent brighter backscatter
             save_geotiff(base / "sentinel1" / sid / f"{pol}_db.tif", arr.astype("float32"), grid)
-    catalog.save_selection(base / "sentinel1" / "selection.json", {"scenes": s1_scenes})
+    catalog.save_selection(base / "sentinel1" / "selection.json",
+                           {"scenes": s1_scenes, "max_scenes": config["sentinel1_max_scenes"]})
 
     y, x = np.mgrid[0:h, 0:w]
     dem = 750 + 0.05 * x * grid.resolution_m + rng.normal(0, 0.05, (h, w))
@@ -81,7 +90,9 @@ def run() -> int:
 
     code = main.run_analysis(LAT, LON, RADIUS, config)
     out = Path(config["output_dir"])
-    expected = ["s2_rgb.tif", "s2_false_color.tif", "ndvi.tif", "ndwi.tif", "nbr.tif", "ndvi_change.tif",
+    expected = ["s2_rgb.tif", "s2_false_color.tif", "ndvi.tif", "ndwi.tif", "nbr.tif", "ndre.tif", "ndmi.tif",
+                "ndvi_change.tif", "s2_rgb_median.tif", "ndvi_median.tif", "ndre_median.tif", "ndmi_median.tif",
+                "ndvi_temporal_std.tif", "s1_vv_mean_db.tif", "s1_vh_mean_db.tif",
                 "s1_vv_db.tif", "s1_vh_db.tif", "s1_vv_change_db.tif", "dem.tif", "slope.tif", "aspect.tif",
                 "hillshade.tif", "lrm.tif", "anomaly.tif", "anomaly_sar.tif", "anomaly_vegetation.tif",
                 "anomaly_terrain.tif", "anomaly_temporal.tif", "anomaly_areas.geojson", "aoi.geojson",

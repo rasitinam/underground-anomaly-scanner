@@ -79,6 +79,11 @@ def layer_metadata(aoi, grid, s2, s1, dem) -> dict:
         if s2.get("reference") and "ndvi_change" in s2["paths"]:
             for name in ("ndvi_reference", "ndvi_change"):
                 layers[name]["product"] = f"{sc['id']} vs {s2['reference']['id']}"
+        comp = s2.get("composite_scenes") or []
+        for name in s2["paths"]:
+            if comp and (name.endswith("_median") or name == "ndvi_temporal_std"):
+                layers[name]["product"] = f"per-pixel median/std of {len(comp)} scenes: " + ", ".join(c["id"] for c in comp)
+                layers[name]["date"] = f"{comp[0]['datetime'][:10]} .. {comp[-1]['datetime'][:10]}"
     if s1:
         ids = [s["id"] for s in s1["scenes"]]
         for name in s1["paths"]:
@@ -165,7 +170,12 @@ def run_analysis(lat: float, lon: float, radius: float, config: dict, refresh: b
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
 
     step(5, TOTAL_STEPS, "Creating QGIS project...")
-    spec = qgis_project.build_spec(out_dir, aoi_path, aoi.utm_epsg, aoi.bounds_utm, config["osm_xyz_url"],
+    basemaps = [
+        {"name": config.get("satellite_basemap_name", "Satellite basemap"),
+         "url": config.get("satellite_basemap_xyz_url", ""), "visible": True},
+        {"name": "OpenStreetMap", "url": config["osm_xyz_url"], "visible": not config.get("satellite_basemap_xyz_url")},
+    ]
+    spec = qgis_project.build_spec(out_dir, aoi_path, aoi.utm_epsg, aoi.bounds_utm, basemaps,
                                    f"Surface anomaly research {lat:.5f}, {lon:.5f} r={radius:.0f} m")
     project = qgis_project.write_project(spec, out_dir / "qgis_layers.json", qgis.qgis_python if qgis else None)
 

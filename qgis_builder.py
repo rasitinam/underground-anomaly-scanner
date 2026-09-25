@@ -14,6 +14,7 @@ import sys
 
 from qgis.core import (
     QgsApplication,
+    QgsBilinearRasterResampler,
     QgsColorRampShader,
     QgsContrastEnhancement,
     QgsCoordinateReferenceSystem,
@@ -36,6 +37,8 @@ RAMPS = {
     "ndvi": [(-0.2, "#a6611a"), (0.1, "#dfc27d"), (0.3, "#f5f5a0"), (0.5, "#80cd6b"), (0.8, "#1a7a2e")],
     "ndwi": [(-0.6, "#8c510a"), (-0.2, "#f6e8c3"), (0.0, "#c7eae5"), (0.4, "#2166ac")],
     "nbr": [(-0.3, "#7f3b08"), (0.0, "#fee0b6"), (0.3, "#b2df8a"), (0.7, "#1b7837")],
+    "ndre": [(0.0, "#a6611a"), (0.15, "#dfc27d"), (0.25, "#f5f5a0"), (0.35, "#80cd6b"), (0.5, "#1a7a2e")],
+    "ndmi": [(-0.3, "#8c510a"), (0.0, "#f6e8c3"), (0.2, "#80cdc1"), (0.5, "#01665e")],
     "anomaly": [(0.0, "#ffffff00"), (0.35, "#ffffb200"), (0.5, "#fecc5c"), (0.7, "#fd8d3c"), (1.0, "#bd0026")],
     "count": [(0, "#ffffff00"), (1, "#ffffb2"), (2, "#fecc5c"), (3, "#f03b20"), (4, "#7a0177")],
 }
@@ -81,7 +84,15 @@ def dem_style(layer: QgsRasterLayer) -> None:
     pseudocolor(layer, stops)
 
 
+def smooth_display(layer: QgsRasterLayer) -> None:
+    # Bilinear display resampling: avoids blocky 10 m pixels on screen (does not add real detail).
+    layer.resampleFilter().setZoomedInResampler(QgsBilinearRasterResampler())
+    layer.resampleFilter().setZoomedOutResampler(QgsBilinearRasterResampler())
+
+
 def style_raster(layer: QgsRasterLayer, style: str) -> None:
+    if style != "count":
+        smooth_display(layer)
     if style == "rgb":
         return  # 3-band uint8 -> QGIS default multiband color renderer
     if style in RAMPS:

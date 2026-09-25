@@ -27,22 +27,35 @@ LAYER_GROUPS: list[tuple[str, list[tuple[str, str, str, bool]]]] = [
         ("anomaly_temporal.tif", "Temporal persistence", "anomaly", False),
     ]),
     ("Sentinel-1 SAR", [
-        ("s1_vv_db.tif", "Sentinel-1 VV (dB)", "gray", False),
-        ("s1_vh_db.tif", "Sentinel-1 VH (dB)", "gray", False),
+        ("s1_vv_mean_db.tif", "Sentinel-1 VV multi-date mean (dB, low speckle)", "gray", False),
+        ("s1_vh_mean_db.tif", "Sentinel-1 VH multi-date mean (dB, low speckle)", "gray", False),
+        ("s1_vv_db.tif", "Sentinel-1 VV latest (dB)", "gray", False),
+        ("s1_vh_db.tif", "Sentinel-1 VH latest (dB)", "gray", False),
         ("s1_vv_minus_vh_db.tif", "Sentinel-1 VV-VH (dB)", "gray", False),
         ("s1_vv_change_db.tif", "SAR change VV (latest - earliest, dB)", "diverging", False),
         ("s1_vv_temporal_std_db.tif", "SAR temporal variability VV (dB)", "gray", False),
     ]),
-    ("Sentinel-2 optical", [
-        ("s2_rgb.tif", "Sentinel-2 RGB", "rgb", True),
+    ("Sentinel-2 multi-date median (cleanest)", [
+        ("s2_rgb_median.tif", "Sentinel-2 RGB median", "rgb", False),
+        ("s2_false_color_median.tif", "Sentinel-2 False Color median", "rgb", False),
+        ("ndvi_median.tif", "NDVI median", "ndvi", False),
+        ("ndre_median.tif", "NDRE median (red-edge, crop marks)", "ndre", False),
+        ("ndmi_median.tif", "NDMI median (moisture)", "ndmi", False),
+        ("ndwi_median.tif", "NDWI median", "ndwi", False),
+        ("ndvi_temporal_std.tif", "NDVI variability over the year", "gray", False),
+    ]),
+    ("Sentinel-2 latest scene", [
+        ("s2_rgb.tif", "Sentinel-2 RGB", "rgb", False),
         ("s2_false_color.tif", "Sentinel-2 False Color (NIR-R-G)", "rgb", False),
         ("ndvi.tif", "NDVI", "ndvi", False),
+        ("ndre.tif", "NDRE (red-edge)", "ndre", False),
+        ("ndmi.tif", "NDMI (moisture)", "ndmi", False),
         ("ndwi.tif", "NDWI", "ndwi", False),
         ("nbr.tif", "NBR", "nbr", False),
         ("ndvi_change.tif", "NDVI change (latest - reference)", "diverging", False),
     ]),
     ("Terrain (Copernicus DEM)", [
-        ("hillshade.tif", "Hillshade", "gray", True),
+        ("hillshade.tif", "Hillshade", "gray", False),
         ("dem.tif", "DEM elevation (m)", "dem", False),
         ("slope.tif", "Slope (deg)", "gray", False),
         ("aspect.tif", "Aspect (deg)", "gray", False),
@@ -57,8 +70,9 @@ def _is_empty_geojson(path: Path) -> bool:
     return not json.loads(path.read_text(encoding="utf-8")).get("features")
 
 
-def build_spec(out_dir: Path, aoi_geojson: Path, utm_epsg: int, extent_utm: tuple, osm_url: str,
+def build_spec(out_dir: Path, aoi_geojson: Path, utm_epsg: int, extent_utm: tuple, basemaps: list[dict],
                title: str) -> dict:
+    """basemaps: [{"name", "url", "visible"}], top-most first."""
     groups = []
     for group_name, layers in LAYER_GROUPS:
         entries = []
@@ -73,7 +87,7 @@ def build_spec(out_dir: Path, aoi_geojson: Path, utm_epsg: int, extent_utm: tupl
     groups[0:0] = [{"name": "Study area", "layers": [
         {"kind": "vector", "path": str(aoi_geojson.resolve()), "name": "AOI", "style": "aoi", "visible": True}]}]
     groups.append({"name": "Basemap", "layers": [
-        {"kind": "xyz", "url": osm_url, "name": "OpenStreetMap", "visible": True}]})
+        {"kind": "xyz", "url": b["url"], "name": b["name"], "visible": b["visible"]} for b in basemaps if b["url"]]})
     return {
         "output": str((out_dir / "project.qgz").resolve()),
         "crs_epsg": utm_epsg,

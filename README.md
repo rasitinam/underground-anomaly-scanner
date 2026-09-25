@@ -52,8 +52,10 @@ The main script runs in any Python 3.10+ that has the libraries. Only the QGIS-p
 |---|---|
 | `project.qgz` | QGIS project, grouped and styled: Study area, Anomaly, Sentinel-1, Sentinel-2, Terrain, OpenStreetMap |
 | `s2_rgb.tif`, `s2_false_color.tif` | Sentinel-2 true colour / false colour (NIR-R-G) |
-| `ndvi.tif`, `ndwi.tif`, `nbr.tif`, `ndvi_change.tif` | Spectral indices, and the NDVI change vs. a scene ~1 year earlier |
-| `s1_vv_db.tif`, `s1_vh_db.tif`, `s1_vv_change_db.tif`, `s1_vv_temporal_std_db.tif` | Sentinel-1 backscatter (dB), change and multi-date variability |
+| `ndvi.tif`, `ndwi.tif`, `nbr.tif`, `ndre.tif`, `ndmi.tif`, `ndvi_change.tif` | Spectral indices of the latest clear scene (NDRE = red-edge, sensitive to crop marks; NDMI = moisture), and the NDVI change vs. a scene ~1 year earlier |
+| `*_median.tif`, `ndvi_temporal_std.tif` | **Multi-date median** of up to 10 clear scenes of the last year (cleanest optical layers), and NDVI variability over the year |
+| `s1_vv_mean_db.tif`, `s1_vh_mean_db.tif` | **Multi-date mean** of up to 15 SAR dates (much less speckle) |
+| `s1_vv_db.tif`, `s1_vh_db.tif`, `s1_vv_change_db.tif`, `s1_vv_temporal_std_db.tif` | Latest Sentinel-1 backscatter (dB), change and multi-date variability |
 | `dem.tif`, `slope.tif`, `aspect.tif`, `hillshade.tif`, `lrm.tif` | Copernicus DEM derivatives; `lrm` = local relief model |
 | `anomaly_*.tif` | Per-source anomaly scores (0–1) |
 | `anomaly.tif` | Combined **anomaly consistency score** (0–1) |
@@ -74,6 +76,7 @@ All data is free and official. Nothing needs an account or API key. Everything i
 | Sentinel-1 RTC / GRD (C-band SAR) | ESA / EU Copernicus | https://planetarycomputer.microsoft.com/dataset/sentinel-1-rtc , https://planetarycomputer.microsoft.com/dataset/sentinel-1-grd | Copernicus Sentinel data terms; see the RTC dataset page for derived-product terms |
 | Copernicus DEM GLO-30 | ESA / EU (DLR, Airbus) | https://planetarycomputer.microsoft.com/dataset/cop-dem-glo-30 | Copernicus DEM licence, free with attribution |
 | OpenStreetMap basemap | OSM contributors | https://www.openstreetmap.org/copyright | ODbL; tile usage policy https://operations.osmfoundation.org/policies/tiles/ |
+| Esri World Imagery basemap (QGIS only) | Esri | https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9 | **Visual reference only, never analysed, not open data**; Esri terms of use apply. Disable by setting `satellite_basemap_xyz_url` to `""` in `config.json` |
 | STAC catalog | Microsoft Planetary Computer | https://planetarycomputer.microsoft.com/api/stac/v1 | Free, anonymous |
 
 Also possible, but not used in v1: Copernicus Data Space Ecosystem (https://dataspace.copernicus.eu, free account needed for downloads; use it to get SAFE files for SNAP) and Landsat 8/9 (USGS, public domain; 30 m, so coarser than Sentinel-2).
@@ -81,11 +84,14 @@ Also possible, but not used in v1: Copernicus Data Space Ecosystem (https://data
 ## Processing
 
 - **AOI**: a WGS84 coordinate. The matching UTM zone is picked automatically, and the AOI is a square of ±radius. Every source is warped onto **one common 10 m UTM grid**, so layers can be compared pixel by pixel.
-- **Sentinel-2**: scenes from the last ~15 months. Cloud-cover fallback **≤10% → ≤20% → ≤30%**, then the least cloudy scene with a warning. The newest scene passing the rule is used. SCL cloud, shadow and snow pixels are masked. The processing-baseline 04.00 offset is handled. A reference scene about 1 year older (same season) is used for temporal comparison.
-- **Sentinel-1**: up to 6 dual-pol scenes from the **same relative orbit and pass direction**, so viewing geometry is constant. Processing uses the best level available:
+- **Sentinel-2**: scenes from the last ~15 months. Cloud-cover fallback **≤10% → ≤20% → ≤30%**, then the least cloudy scene with a warning. The newest scene passing the rule is used. SCL cloud, shadow and snow pixels are masked. The processing-baseline 04.00 offset is handled. A reference scene about 1 year older (same season) is used for temporal comparison. In addition, up to 10 clear scenes (≤20% cloud) of the last year, one per date, are cloud-masked and combined into a **per-pixel median**. This removes noise and single-day effects, but it cannot add detail below the 10 m pixel. The anomaly analysis uses the median NDVI, and the temporal persistence uses every date.
+- **Sentinel-1**: up to 15 dual-pol scenes from the **same relative orbit and pass direction**, so viewing geometry is constant. Processing uses the best level available:
   1. **ESA SNAP** (if installed and `--s1-safe` is given): Apply Orbit File → Calibration (σ⁰) → Lee Speckle Filter → Terrain Correction (Copernicus 30 m DEM) → dB.
   2. **`sentinel-1-rtc`** (radiometrically terrain corrected γ⁰), if accessible anonymously.
   3. **`sentinel-1-grd`** fallback: windowed read and GCP geocoding (only the AOI window is read), approximate σ⁰ from the product's calibration LUT, Lee filter, dB. **No terrain correction**: positions may shift in hilly terrain, so treat SAR anomalies as relative indicators. The processing level of every scene is written to the report.
+
+  All dates are then averaged in linear power (multi-temporal speckle reduction), and the SAR anomaly uses this mean.
+- **Display**: QGIS shows rasters with bilinear resampling, so 10 m pixels are not drawn as blocks. This is smoother on screen but not more detailed.
 - **DEM**: elevation, slope, aspect and hillshade use Horn's method (same as `gdaldem`), done in numpy. The local relief model is DEM − Gaussian-smoothed DEM (~100 m scale) and highlights small mounds and depressions. Native resolution is ~30 m; resampling to the 10 m grid adds no detail.
 
 ## Anomaly method (simple and explainable)

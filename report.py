@@ -37,6 +37,9 @@ DATA_SOURCES = [
      "Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA."),
     ("OpenStreetMap (basemap)", "https://www.openstreetmap.org/copyright",
      "ODbL, (c) OpenStreetMap contributors. Tile usage policy: https://operations.osmfoundation.org/policies/tiles/"),
+    ("Esri World Imagery (QGIS basemap only)", "https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9",
+     "Visual reference only; NOT used in the analysis and not open data. Subject to Esri terms of use; "
+     "remove it by emptying 'satellite_basemap_xyz_url' in config.json."),
     ("STAC access: Microsoft Planetary Computer", "https://planetarycomputer.microsoft.com/",
      "Free, anonymous access (no account or API key). Hosts the official data unchanged as COGs."),
 ]
@@ -124,7 +127,9 @@ def build_report(ctx: dict, out_path: Path) -> Path:
     parts.append("<h2>Sentinel-2 scenes</h2>")
     if s2:
         rows = []
-        for role, sc in (("selected", s2["scene"]), ("reference (temporal)", s2.get("reference"))):
+        roles = [("selected", s2["scene"]), ("reference (temporal)", s2.get("reference"))]
+        roles += [("median composite", c) for c in s2.get("composite_scenes") or []]
+        for role, sc in roles:
             if sc:
                 rows.append([role, sc["id"], sc["datetime"][:10], sc.get("cloud_cover_pct"),
                              sc.get("aoi_valid_pct"), sc.get("platform")])
@@ -179,7 +184,11 @@ def build_report(ctx: dict, out_path: Path) -> Path:
     else:
         parts.append("<p class='na'>Anomaly analysis could not be run.</p>")
 
-    imgs = [("Sentinel-2 RGB", _quicklook_rgb(out_dir / "s2_rgb.tif")),
+    rgb_path = out_dir / "s2_rgb_median.tif"
+    if not rgb_path.exists():
+        rgb_path = out_dir / "s2_rgb.tif"
+    imgs = [(f"Sentinel-2 RGB ({'multi-date median' if 'median' in rgb_path.name else 'latest scene'}, 10 m)",
+             _quicklook_rgb(rgb_path)),
             ("Anomaly consistency score", _quicklook_score(out_dir / "anomaly.tif"))]
     imgs = [(t, u) for t, u in imgs if u]
     if imgs:

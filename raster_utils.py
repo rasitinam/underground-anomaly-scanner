@@ -150,10 +150,11 @@ def local_zscore(array: np.ndarray, window_px: int) -> np.ndarray:
 
 
 def nan_reduce(stack: np.ndarray, how: str = "mean") -> np.ndarray:
-    """np.nanmean / np.nanstd along axis 0 without 'empty slice' warnings (all-NaN -> NaN)."""
+    """np.nanmean / nanmedian / nanstd along axis 0 without 'empty slice' warnings (all-NaN -> NaN)."""
+    reducers = {"mean": np.nanmean, "median": np.nanmedian, "std": np.nanstd}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        result = np.nanmean(stack, axis=0) if how == "mean" else np.nanstd(stack, axis=0)
+        result = reducers[how](stack, axis=0)
     return result.astype("float32")
 
 
