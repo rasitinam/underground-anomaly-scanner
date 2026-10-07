@@ -4,17 +4,17 @@
 >
 > **TR:** Uydu uzaktan algılama verileri yeraltındaki nesneleri doğrudan görüntülemez. Bu yazılım yalnızca yüzeyde görülen ve yeraltıyla ilişkili olabilecek anomalileri dolaylı olarak tespit eder. Yeraltında bir yapının varlığını doğrulamak için GPR, elektrik özdirenç tomografisi (ERT), sismik yöntemler veya uygun diğer saha ölçümleri gerekir. **GPR uydu analizinin alternatifi değildir; gerektiğinde uygulanan bir saha doğrulama yöntemidir.**
 
-You give a coordinate. The tool builds a study area around it and pulls free, official satellite data for it, cropped to the study area only. It computes explainable surface-anomaly layers and writes a ready-to-open QGIS project plus an HTML report.
+You give a coordinate. The tool builds a study area around it and pulls free, official satellite data for it, cropped to the study area only. It computes explainable surface-anomaly layers and writes an interactive web map (`output/map.html`, opens in any browser, nothing to install), an HTML report and, if QGIS is installed, a ready-to-open QGIS project.
 
 ```
-Coordinate → AOI → free official satellite data → processing → anomaly analysis → QGIS project → HTML report
+Coordinate → AOI → free official satellite data → processing → anomaly analysis → web map (+ optional QGIS project) → HTML report
 ```
 
 The tool never says "there is a tunnel/room/buried structure here". It only uses the terms *vegetation anomaly*, *SAR backscatter anomaly*, *terrain anomaly*, *temporal persistence* and *MULTI-SOURCE ANOMALY*.
 
 ## Quick start (Windows)
 
-1. Install **QGIS** (free): https://qgis.org/download/ — the tool finds it automatically (Program Files, OSGeo4W, registry); no paths are hardcoded.
+1. *(Optional)* Install **QGIS** (free) if you also want a desktop GIS project: https://qgis.org/download/ — without it you still get the browser map. The tool finds QGIS automatically (Program Files, OSGeo4W, registry); no paths are hardcoded.
 2. Check your machine. Nothing gets installed by this step:
    ```
    python main.py --check-env
@@ -32,7 +32,7 @@ The tool never says "there is a tunnel/room/buried structure here". It only uses
    You can also run `python main.py` with no arguments to get the interactive menu:
    ```
    UNDERGROUND ANOMALY SCANNER
-   [1] Start Analysis   [2] Open QGIS   [3] Exit
+   [1] Start Analysis   [2] Open map (web browser)   [3] Open QGIS   [4] Exit
    ```
 
 The main script runs in any Python 3.10+ that has the libraries. Only the QGIS-project step runs inside **QGIS's own Python** (`python-qgis*.bat`), started automatically as a subprocess.
@@ -40,7 +40,8 @@ The main script runs in any Python 3.10+ that has the libraries. Only the QGIS-p
 | Option | Meaning |
 |---|---|
 | `--radius` | 100, 250 (default), 500, 1000, 2000 m. Larger areas take longer; the tool warns above 500 m. |
-| `--open` | Open `output/project.qgz` in QGIS when finished |
+| `--open` | Open `output/map.html` in the default browser when finished (and `output/project.qgz` in QGIS, if it was built) |
+| `--open-map` | Open the web map of the last run |
 | `--refresh` | Ignore cached scene selections and search the catalog again |
 | `--s1-safe PATH` | Optional: a full Sentinel-1 SAFE product for ESA SNAP preprocessing (see below) |
 | `--build-qgis` | Rebuild the QGIS project from the last run (e.g. after installing QGIS) |
@@ -50,7 +51,8 @@ The main script runs in any Python 3.10+ that has the libraries. Only the QGIS-p
 
 | File | Content |
 |---|---|
-| `project.qgz` | QGIS project, grouped and styled: Study area, Anomaly, Sentinel-1, Sentinel-2, Terrain, OpenStreetMap |
+| `map.html` | Interactive web map (Leaflet, free/open source): every layer below with the same colours as QGIS, layer switcher, opacity, legend, Esri/OSM basemap, click for coordinates, anomaly polygons with their properties. Needs internet for basemap tiles |
+| `project.qgz` | QGIS project (only when QGIS is installed), grouped and styled: Study area, Anomaly, Sentinel-1, Sentinel-2, Terrain, OpenStreetMap |
 | `s2_rgb.tif`, `s2_false_color.tif` | Sentinel-2 true colour / false colour (NIR-R-G) |
 | `ndvi.tif`, `ndwi.tif`, `nbr.tif`, `ndre.tif`, `ndmi.tif`, `ndvi_change.tif` | Spectral indices of the latest clear scene (NDRE = red-edge, sensitive to crop marks; NDMI = moisture), and the NDVI change vs. a scene ~1 year earlier |
 | `*_median.tif`, `ndvi_temporal_std.tif` | **Multi-date median** of up to 10 clear scenes of the last year (cleanest optical layers), and NDVI variability over the year |
@@ -76,7 +78,7 @@ All data is free and official. Nothing needs an account or API key. Everything i
 | Sentinel-1 RTC / GRD (C-band SAR) | ESA / EU Copernicus | https://planetarycomputer.microsoft.com/dataset/sentinel-1-rtc , https://planetarycomputer.microsoft.com/dataset/sentinel-1-grd | Copernicus Sentinel data terms; see the RTC dataset page for derived-product terms |
 | Copernicus DEM GLO-30 | ESA / EU (DLR, Airbus) | https://planetarycomputer.microsoft.com/dataset/cop-dem-glo-30 | Copernicus DEM licence, free with attribution |
 | OpenStreetMap basemap | OSM contributors | https://www.openstreetmap.org/copyright | ODbL; tile usage policy https://operations.osmfoundation.org/policies/tiles/ |
-| Esri World Imagery basemap (QGIS only) | Esri | https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9 | **Visual reference only, never analysed, not open data**; Esri terms of use apply. Disable by setting `satellite_basemap_xyz_url` to `""` in `config.json` |
+| Esri World Imagery basemap (web map / QGIS only) | Esri | https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9 | **Visual reference only, never analysed, not open data**; Esri terms of use apply. Disable by setting `satellite_basemap_xyz_url` to `""` in `config.json` |
 | STAC catalog | Microsoft Planetary Computer | https://planetarycomputer.microsoft.com/api/stac/v1 | Free, anonymous |
 
 Also possible, but not used in v1: Copernicus Data Space Ecosystem (https://dataspace.copernicus.eu, free account needed for downloads; use it to get SAFE files for SNAP) and Landsat 8/9 (USGS, public domain; 30 m, so coarser than Sentinel-2).
@@ -138,6 +140,7 @@ catalog.py         STAC search + cached scene selection
 raster_utils.py    common grid, cached windowed reads, GeoTIFF writing, z-score helpers
 sentinel2.py       Phase 4-5     dem.py        Phase 6
 sentinel1.py       Phase 8-9     anomaly.py    Phase 10
+web_map.py         Phase 7: output/map.html (Leaflet web map, no GIS needed)
 qgis_project.py    Phase 7 (launcher)   qgis_builder.py  runs inside QGIS Python
 report.py          Phase 11 HTML report
 selftest_offline.py  offline end-to-end test with synthetic data
