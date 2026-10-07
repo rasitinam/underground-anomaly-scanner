@@ -3,13 +3,15 @@ UNDERGROUND ANOMALY SCANNER - surface anomaly research from free satellite data.
 
 Satellite data does NOT image the subsurface. This tool looks for indirect,
 surface-level indicators (vegetation, SAR backscatter, micro-topography and
-their persistence over time) and shows them in QGIS.
+their persistence over time) and shows them on an interactive web map
+(output/map.html, opens in any browser) and, when QGIS is installed, in QGIS.
 
 Usage:
     python main.py                                   (interactive menu)
     python main.py --lat 40.735 --lon 31.605 --radius 250
     python main.py --check-env
-    python main.py --build-qgis                      (rebuild project from last run)
+    python main.py --build-qgis                      (rebuild QGIS project from last run)
+    python main.py --open-map                        (open the web map of the last run)
 """
 from __future__ import annotations
 
@@ -112,6 +114,7 @@ def run_analysis(lat: float, lon: float, radius: float, config: dict, refresh: b
     import report
     import sentinel1
     import sentinel2
+    import web_map
     from aoi import build_aoi, large_area_warning
     from raster_utils import make_grid
 
@@ -169,14 +172,15 @@ def run_analysis(lat: float, lon: float, radius: float, config: dict, refresh: b
         metadata["anomaly"] = an["stats"]
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
 
-    step(5, TOTAL_STEPS, "Creating QGIS project...")
+    step(5, TOTAL_STEPS, "Creating interactive web map and QGIS project...")
     basemaps = [
         {"name": config.get("satellite_basemap_name", "Satellite basemap"),
          "url": config.get("satellite_basemap_xyz_url", ""), "visible": True},
         {"name": "OpenStreetMap", "url": config["osm_xyz_url"], "visible": not config.get("satellite_basemap_xyz_url")},
     ]
-    spec = qgis_project.build_spec(out_dir, aoi_path, aoi.utm_epsg, aoi.bounds_utm, basemaps,
-                                   f"Surface anomaly research {lat:.5f}, {lon:.5f} r={radius:.0f} m")
+    title = f"Surface anomaly research {lat:.5f}, {lon:.5f} r={radius:.0f} m"
+    map_path = web_map.build_map(out_dir, aoi_path, basemaps, title)
+    spec = qgis_project.build_spec(out_dir, aoi_path, aoi.utm_epsg, aoi.bounds_utm, basemaps, title)
     project = qgis_project.write_project(spec, out_dir / "qgis_layers.json", qgis.qgis_python if qgis else None)
 
     step(6, TOTAL_STEPS, "Writing HTML report...")
@@ -191,15 +195,19 @@ def run_analysis(lat: float, lon: float, radius: float, config: dict, refresh: b
     print()
     print("Analysis complete." if available else "Analysis finished WITHOUT any satellite data (see run.log).")
     print(f"Data sources used: {', '.join(available) or 'none'}")
-    print(f"QGIS project:\n    {project if project else 'NOT created (QGIS not found or build failed, see run.log)'}")
+    print(f"Interactive map (any web browser):\n    {map_path if map_path else 'NOT created (see run.log)'}")
+    print(f"QGIS project (optional):\n    {project if project else 'not created (QGIS not installed or build failed)'}")
     if an:
         print(f"Multi-source anomaly map:\n    {an['paths']['anomaly']}")
         print(f"Multi-source anomaly areas: {an['stats']['n_polygons']} (surface indicators only, not detections)")
     print(f"Report:\n    {report_path}")
     print(f"Log:\n    {out_dir / 'run.log'}")
 
-    if open_qgis and project:
-        qgis_project.open_in_qgis(project, qgis.qgis_bin if qgis else None)
+    if open_qgis:
+        if map_path:
+            web_map.open_in_browser(map_path)
+        if project:
+            qgis_project.open_in_qgis(project, qgis.qgis_bin if qgis else None)
     return 0 if available else 2
 
 
@@ -215,6 +223,16 @@ def rebuild_qgis(config: dict) -> int:
     qgis = next((q for q in installs if q.qgis_python), None)
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     return 0 if qgis_project.write_project(spec, spec_path, qgis.qgis_python if qgis else None) else 1
+
+
+def open_last_map(config: dict) -> int:
+    import web_map
+
+    map_path = ROOT / config["output_dir"] / "map.html"
+    if not map_path.exists():
+        print("No map yet: output/map.html does not exist. Run an analysis first.")
+        return 1
+    return 0 if web_map.open_in_browser(map_path) else 1
 
 
 def open_last_project(config: dict) -> None:
@@ -260,8 +278,9 @@ def interactive(config: dict) -> int:
         print(" (surface anomaly research - indirect indicators)")
         print("=" * 52)
         print("[1] Start Analysis")
-        print("[2] Open QGIS")
-        print("[3] Exit")
+        print("[2] Open map (web browser)")
+        print("[3] Open QGIS")
+        print("[4] Exit")
         choice = input("> ").strip()
         if choice == "1":
             lat = ask_float("Latitude  (WGS84, e.g. 40.735): ", -90, 90)
@@ -269,19 +288,23 @@ def interactive(config: dict) -> int:
             radius = ask_radius(config)
             run_analysis(lat, lon, radius, config)
         elif choice == "2":
-            open_last_project(config)
+            open_last_map(config)
         elif choice == "3":
+            open_last_project(config)
+        elif choice == "4":
             return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Surface anomaly research from free satellite data (QGIS output).")
+    parser = argparse.ArgumentParser(description="Surface anomaly research from free satellite data (web map + optional QGIS).")
     parser.add_argument("--lat", type=float, help="Latitude, WGS84 decimal degrees")
     parser.add_argument("--lon", type=float, help="Longitude, WGS84 decimal degrees")
     parser.add_argument("--radius", type=float, help="Radius in metres (100, 250, 500, 1000, 2000)")
     parser.add_argument("--check-env", action="store_true", help="Print environment report and exit")
     parser.add_argument("--build-qgis", action="store_true", help="Rebuild output/project.qgz from the last run")
-    parser.add_argument("--open", action="store_true", help="Open the project in QGIS when finished")
+    parser.add_argument("--open", action="store_true",
+                        help="Open the web map in the browser when finished (and the QGIS project, if QGIS is installed)")
+    parser.add_argument("--open-map", action="store_true", help="Open output/map.html from the last run and exit")
     parser.add_argument("--refresh", action="store_true", help="Ignore cached scene selections and search again")
     parser.add_argument("--s1-safe", type=Path, help="Optional Sentinel-1 SAFE product (.zip/.SAFE) for ESA SNAP processing")
     args = parser.parse_args()
@@ -296,6 +319,8 @@ def main() -> int:
         return 1
     if args.build_qgis:
         return rebuild_qgis(config)
+    if args.open_map:
+        return open_last_map(config)
     if args.lat is None and args.lon is None:
         return interactive(config)
     if args.lat is None or args.lon is None:
